@@ -35,24 +35,35 @@ app.get("/", (req, res) => {
   res.send("<h1>Hello world</h1>");
 });
 
-io.on("connection", async (socket) => {
-  console.log("a user connected");
+//Configure Socket.IO Connection
 
+io.on("connection", async (socket) => {
+  io.emit("chat message", `${socket.id} got connected`);
   socket.on("disconnect", () => {
-    console.log("a user disconnected");
+    io.emit("chat message", `${socket.id} got disconnected`);
   });
 
-  socket.on("chat message", async (msg) => {
+  socket.on("chat message", async (msg, clientOffset, callback) => {
     let result;
     try {
       // store the message in the database
-      result = await db.run("INSERT INTO messages (content) VALUES (?)", msg);
+      result = await db.run(
+        "INSERT INTO messages (content, client_offset) VALUES (?, ?)",
+        msg,
+        clientOffset
+      );
     } catch (e) {
-      // TODO handle the failure
+      if (e.errno === 19 /* SQLITE_CONSTRAINT */) {
+        // the message was already inserted, so we notify the client
+        callback();
+      } else {
+        // nothing to do, just let the client retry
+      }
       return;
     }
     // include the offset with the message
-    io.emit("chat message", msg, result.lastID);
+    io.emit("chat message", `${socket.id}: ${msg}`, result.lastID);
+    callback();
   });
 
   if (!socket.recovered) {
